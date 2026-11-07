@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>HackerTok</title>
+<meta name="description" content="Scroll the YouTube videos Hacker News keeps recommending, each dropped in at a random minute.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff6600'/%3E%3Ctext x='16' y='23.5' text-anchor='middle' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='20' fill='white'%3EHT%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#000; --fg:#fff; --dim:rgba(255,255,255,.78); --faint:rgba(255,255,255,.5);
+  --orange:#ff6600; --panel:#121212; --line:rgba(255,255,255,.1); --chip:rgba(255,255,255,.12);
+  --heart:#fe2c55; --cyan:#25f4ee; --shadow:0 1px 3px rgba(0,0,0,.55);
+  --side:240px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--fg);font:15px/1.38 "Proxima Nova",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+
+/* ---------- logo ---------- */
+.logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:22px;letter-spacing:-.5px}
+.mark{position:relative;width:30px;height:30px;border-radius:8px;background:var(--orange);display:grid;place-items:center;font-size:15px;font-weight:900;color:#fff;box-shadow:-2px -2px 0 var(--cyan),2px 2px 0 var(--heart)}
+.logo .t2{color:var(--orange)}
+
+/* ---------- mobile top tabs ---------- */
+.top{position:fixed;top:0;left:0;right:0;z-index:20;display:flex;justify-content:center;gap:20px;padding:max(14px,env(safe-area-inset-top)) 16px 10px;pointer-events:none}
+.top>*{pointer-events:auto}
+.top .tab{font-weight:700;font-size:17px;color:var(--faint);text-shadow:var(--shadow);position:relative;padding-bottom:6px}
+.top .tab.on{color:#fff}
+.top .tab.on::after{content:"";position:absolute;left:50%;bottom:0;width:26px;height:3px;border-radius:3px;background:#fff;transform:translateX(-50%)}
+.top .mute-m{position:absolute;right:14px;top:max(12px,env(safe-area-inset-top));width:34px;height:34px;display:grid;place-items:center;filter:drop-shadow(var(--shadow))}
+.top .mute-m svg{width:24px;height:24px;fill:#fff}
+.top .mark{position:absolute;left:16px;top:max(13px,env(safe-area-inset-top));width:28px;height:28px;font-size:13px}
+
+/* ---------- desktop sidebar ---------- */
+.side{display:none}
+@media (min-width:900px){
+  .top{display:none}
+  .side{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:var(--side);padding:20px 14px;z-index:20;border-right:1px solid var(--line);background:#000}
+  .side .logo{padding:0 8px 22px}
+  .nav{display:flex;align-items:center;gap:12px;padding:10px 10px;border-radius:8px;font-weight:700;font-size:17px;color:var(--dim);width:100%;text-align:left}
+  .nav svg{width:26px;height:26px;fill:currentColor}
+  .nav:hover{background:rgba(255,255,255,.06)}
+  .nav.on{color:var(--orange)}
+  .nav .count{margin-left:auto;font-size:13px;color:var(--faint);font-weight:600}
+  .side hr{border:0;border-top:1px solid var(--line);margin:14px 8px}
+  .side .hint{font-size:13px;color:var(--faint);padding:0 10px;line-height:1.7}
+  .side .hint kbd{background:var(--chip);border-radius:4px;padding:0 6px;font:600 12px ui-monospace,monospace;color:var(--dim)}
+  .side .foot{margin-top:auto;font-size:12px;color:var(--faint);padding:0 10px;line-height:1.5}
+  .side .foot a{text-decoration:underline}
+}
+
+/* ---------- feed ---------- */
+.feed{position:fixed;inset:0;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none;overscroll-behavior:contain}
+@media (min-width:900px){.feed{left:var(--side)}}
+.feed::-webkit-scrollbar{display:none}
+.slide{position:relative;height:100vh;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;justify-content:center;gap:18px}
+
+/* the 9:16 card */
+.card{position:relative;width:100%;height:100%;overflow:hidden;background:#000}
+@media (min-width:600px){
+  .card{height:calc(100dvh - 32px);width:auto;aspect-ratio:9/16;border-radius:16px;max-width:calc(100vw - 120px)}
+}
+@media (min-width:900px){.card{max-width:calc(100vw - var(--side) - 120px)}}
+
+.media{position:absolute;inset:0;overflow:hidden}
+.media .bg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(30px) brightness(.45);transform:scale(1.1);opacity:0;transition:opacity .3s}
+.media .poster,.media iframe{position:absolute;border:0;pointer-events:none}
+/* fill: crop the 16:9 video to cover the 9:16 card, like TikTok */
+.card.fill .media .poster{inset:0;width:100%;height:100%;object-fit:cover}
+/* oversize the player a little so YouTube's own title bar and corner logo fall outside the card */
+.card.fill .media iframe{top:-70px;left:50%;height:calc(100% + 140px);width:auto;aspect-ratio:16/9;transform:translateX(-50%)}
+/* fit: whole video, letterboxed on a blurred backdrop */
+.card.fit .media .bg{opacity:1}
+.card.fit .media .poster,.card.fit .media iframe{left:0;top:50%;width:100%;height:auto;aspect-ratio:16/9;transform:translateY(-50%);object-fit:cover}
+.shade{position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(0,0,0,.35),transparent 18%,transparent 55%,rgba(0,0,0,.7))}
+
+/* tap layer, pause icon, heart burst */
+.tap{position:absolute;inset:0;z-index:2;cursor:pointer}
+.paused{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;z-index:3;pointer-events:none;opacity:0;transform:scale(1.4);transition:opacity .15s,transform .15s}
+.paused svg{width:100%;height:100%;fill:rgba(255,255,255,.75);filter:drop-shadow(0 2px 8px rgba(0,0,0,.4))}
+.card.is-paused .paused{opacity:1;transform:none}
+.burst{position:absolute;z-index:6;width:110px;height:110px;margin:-55px 0 0 -55px;pointer-events:none;animation:burst .9s ease-out forwards}
+.burst svg{width:100%;height:100%;fill:var(--heart);filter:drop-shadow(0 4px 12px rgba(254,44,85,.5))}
+@keyframes burst{0%{transform:scale(.2) rotate(var(--r));opacity:0}15%{transform:scale(1.15) rotate(var(--r));opacity:1}30%{transform:scale(.95) rotate(var(--r))}70%{opacity:1;transform:scale(1) rotate(var(--r)) translateY(0)}100%{opacity:0;transform:scale(1.3) rotate(var(--r)) translateY(-120px)}}
+.loading{position:absolute;left:50%;top:50%;width:46px;height:20px;margin:-10px 0 0 -23px;z-index:3;pointer-events:none;display:none}
+.card.is-loading .loading{display:block}
+.loading i{position:absolute;top:0;width:20px;height:20px;border-radius:50%;mix-blend-mode:screen;animation:dots .9s ease-in-out infinite alternate}
+.loading i:first-child{left:0;background:var(--cyan)}
+.loading i:last-child{right:0;background:var(--heart);animation-direction:alternate-reverse}
+@keyframes dots{to{transform:translateX(26px)}}
+.loading i:last-child{animation-name:dots2}
+@keyframes dots2{to{transform:translateX(-26px)}}
+
+/* top-of-card controls */
+.ctl{position:absolute;top:14px;z-index:5;display:flex;gap:6px}
+.ctl.l{left:14px}.ctl.r{right:14px}
+@media (max-width:599px){.ctl{top:max(58px,calc(env(safe-area-inset-top) + 48px))}.ctl.l{display:none}}
+.cbtn{height:34px;min-width:34px;padding:0 9px;border-radius:999px;background:rgba(0,0,0,.35);display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;backdrop-filter:blur(6px)}
+.cbtn:hover{background:rgba(0,0,0,.55)}
+.cbtn svg{width:20px;height:20px;fill:#fff}
+.cbtn.ytb svg{width:24px;height:17px}
+
+/* drop-in toast on the card */
+.drop{position:absolute;left:50%;top:22%;z-index:4;transform:translate(-50%,8px);background:rgba(0,0,0,.6);backdrop-filter:blur(8px);border-radius:10px;padding:8px 14px;font-weight:700;font-size:14px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .3s,transform .3s}
+.drop.on{opacity:1;transform:translate(-50%,0)}
+.drop small{display:block;font-weight:500;font-size:12px;color:var(--dim);text-align:center}
+
+/* caption */
+.cap{position:absolute;left:0;right:76px;bottom:0;z-index:4;padding:0 14px calc(18px + env(safe-area-inset-bottom));text-shadow:var(--shadow)}
+@media (min-width:600px){.cap{right:16px;padding-bottom:20px}}
+.who{font-weight:700;font-size:16.5px;display:flex;align-items:center;gap:6px}
+.who .y{font-size:13px;font-weight:500;color:var(--dim)}
+.desc{margin-top:5px;font-size:14.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.desc.open{-webkit-line-clamp:unset;max-height:42dvh;overflow-y:auto;text-shadow:none;background:rgba(0,0,0,.45);border-radius:10px;padding:8px 10px;margin-left:-10px}
+.desc .ttl{font-weight:700}
+.desc .tags b{font-weight:700;margin-right:5px;white-space:nowrap}
+.desc .q{color:#ffb37f;font-weight:600}
+.desc .sum{display:block;margin-top:6px;color:var(--dim)}
+.more{font-weight:700;font-size:14px;margin-top:2px;color:#fff}
+.sound{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:14px;overflow:hidden;max-width:min(100%,260px)}
+.sound svg{width:15px;height:15px;fill:#fff;flex:none}
+.sound .mq{overflow:hidden;white-space:nowrap;mask-image:linear-gradient(90deg,transparent,#000 6%,#000 90%,transparent)}
+.sound .mq span{display:inline-block;padding-left:6px;animation:mq 11s linear infinite}
+@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.card.is-paused .sound .mq span{animation-play-state:paused}
+
+/* progress bar */
+.prog{position:absolute;left:0;right:0;bottom:0;height:16px;z-index:6;cursor:pointer;display:flex;align-items:flex-end;touch-action:none}
+.prog .tr{position:relative;width:100%;height:2px;background:rgba(255,255,255,.25);transition:height .15s}
+.prog .fl{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.9)}
+.prog .kn{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;opacity:0;transition:opacity .15s}
+.prog:hover .tr,.prog.drag .tr{height:5px}
+.prog:hover .kn,.prog.drag .kn{opacity:1}
+.prog .tm{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:800;text-shadow:0 2px 8px rgba(0,0,0,.7);opacity:0;pointer-events:none;white-space:nowrap}
+.prog.drag .tm{opacity:1}
+.prog.drag ~ .cap{opacity:0}
+
+/* action rail */
+.rail{position:absolute;right:6px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:5;display:flex;flex-direction:column;align-items:center;gap:14px}
+@media (min-width:600px){.rail{position:static;align-self:flex-end;margin-bottom:24px;gap:16px}}
+.av{position:relative;width:48px;height:48px;border-radius:50%;border:1.5px solid #fff;display:grid;place-items:center;font-weight:800;font-size:19px;color:#000;margin-bottom:10px}
+.av .plus{position:absolute;left:50%;bottom:-10px;width:21px;height:21px;margin-left:-10.5px;border-radius:50%;background:var(--orange);color:#fff;font-size:12px;font-weight:900;display:grid;place-items:center;box-shadow:0 0 0 2px #000}
+.act{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12.5px;font-weight:700;text-shadow:var(--shadow)}
+.act .ic{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;transition:transform .12s}
+.act svg{width:34px;height:34px;fill:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
+.act:active .ic{transform:scale(.88)}
+@media (min-width:600px){
+  .act{text-shadow:none;color:var(--dim)}
+  .act .ic{width:48px;height:48px;background:rgba(255,255,255,.12)}
+  .act:hover .ic{background:rgba(255,255,255,.2)}
+  .act svg{width:24px;height:24px;filter:none}
+  .av{border:0}
+}
+.act.liked svg{fill:var(--heart)}
+.act.liked .ic{animation:pop .4s}
+@keyframes pop{0%{transform:scale(.6)}50%{transform:scale(1.25)}100%{transform:scale(1)}}
+.disc{width:46px;height:46px;border-radius:50%;margin-top:6px;background:radial-gradient(circle,#333 0 22%,#111 23% 100%);display:grid;place-items:center;animation:spin 5s linear infinite;box-shadow:0 0 0 7px #1d1d1d inset}
+.disc img{width:26px;height:26px;border-radius:50%;object-fit:cover}
+.slide.paused-disc .disc,.card.is-paused ~ .rail .disc{animation-play-state:paused}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* nav arrows on desktop */
+.arrows{display:none}
+@media (min-width:900px){
+  .arrows{display:flex;flex-direction:column;gap:14px;position:fixed;right:24px;top:50%;transform:translateY(-50%);z-index:10}
+  .arrows button{width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.1);display:grid;place-items:center}
+  .arrows button:hover{background:rgba(255,255,255,.2)}
+  .arrows svg{width:22px;height:22px;fill:#fff}
+}
+
+/* ---------- comments drawer ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:30;opacity:0;pointer-events:none;transition:opacity .25s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;z-index:31;left:0;right:0;bottom:0;height:72dvh;background:var(--panel);border-radius:14px 14px 0 0;transform:translateY(105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column}
+.sheet.on{transform:none}
+@media (min-width:900px){.sheet{left:auto;top:0;height:auto;width:440px;border-radius:0;transform:translateX(105%);border-left:1px solid var(--line)}.scrim{background:transparent}}
+.grab{width:38px;height:4px;border-radius:4px;background:rgba(255,255,255,.25);margin:8px auto 0}
+@media (min-width:900px){.grab{display:none}}
+.sh-head{padding:10px 16px 8px;display:flex;align-items:center}
+.sh-head h2{font-size:14px;font-weight:700;flex:1;text-align:center}
+.sh-head button{width:30px;height:30px;border-radius:50%;font-size:22px;line-height:1;color:var(--dim)}
+.sh-sub{font-size:12px;color:var(--faint);text-align:center;padding:0 16px 8px;border-bottom:1px solid var(--line)}
+.clist{overflow-y:auto;padding:4px 16px 30px;flex:1}
+.cm{display:flex;gap:11px;padding:14px 0}
+.cav{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;color:#000;flex:none}
+.cbody{flex:1;min-width:0}
+.cm-a{font-size:13.5px;font-weight:600;color:var(--faint);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.st{font-size:11px;font-weight:700;border-radius:4px;padding:1px 6px}
+.st.strong_rec{background:rgba(255,102,0,.2);color:#ff9a52}
+.st.rec{background:rgba(80,200,120,.16);color:#7ee0a0}
+.st.reference{background:var(--chip);color:var(--dim)}
+.st.critical{background:rgba(255,80,80,.16);color:#ff8f8f}
+.st.joke{background:rgba(170,120,255,.18);color:#c6a8ff}
+.cm-t{margin-top:3px;font-size:15px;white-space:pre-wrap;word-wrap:break-word}
+.cm-t .tok{background:var(--chip);border-radius:4px;padding:0 4px;font-size:12px;font-weight:700;color:var(--dim)}
+.cm-t .tok.v{background:rgba(255,102,0,.25);color:#ffb37f}
+.cm-meta{margin-top:6px;font-size:12.5px;color:var(--faint);display:flex;gap:14px;flex-wrap:wrap}
+.cm-meta a{font-weight:700}
+.cm-meta a:hover{color:var(--orange)}
+.empty{color:var(--faint);text-align:center;padding:40px 10px}
+
+/* ---------- splash, toast, help ---------- */
+.splash{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:radial-gradient(circle at 50% 38%,#2a1200,#000 70%);text-align:center;padding:24px}
+.splash .logo{justify-content:center;font-size:46px;letter-spacing:-1.5px;gap:14px}
+.splash .mark{width:58px;height:58px;border-radius:15px;font-size:27px;box-shadow:-3px -3px 0 var(--cyan),3px 3px 0 var(--heart)}
+.splash p{color:var(--dim);max-width:380px;margin:16px auto 28px}
+.go{background:var(--heart);color:#fff;font-weight:800;font-size:17px;border-radius:6px;padding:14px 44px}
+.go:disabled{opacity:.5}
+.credit{font-size:12px;color:var(--faint);margin-top:26px;max-width:380px}
+.credit a{text-decoration:underline}
+.toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;background:rgba(40,40,40,.92);border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.help-box{position:fixed;z-index:61;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px;width:min(92vw,340px);display:none}
+.help-box.on{display:block}
+.help-box h3{margin-bottom:10px}
+.help-box div{display:flex;justify-content:space-between;padding:4px 0;color:var(--dim);font-size:14px}
+.help-box kbd{background:var(--chip);border-radius:5px;padding:1px 7px;font:600 12.5px ui-monospace,monospace;color:var(--fg)}
+.help-box small{display:block;margin-top:12px;color:var(--faint)}
+.saved-empty{position:fixed;inset:0;display:none;place-items:center;text-align:center;color:var(--dim);padding:30px;z-index:1}
+@media (min-width:900px){.saved-empty{left:var(--side)}}
+.saved-empty.on{display:grid}
+.saved-empty svg{width:56px;height:56px;fill:rgba(255,255,255,.3);margin:0 auto 10px}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <span class="mark">HT</span>
+  <button class="tab" data-tab="saved">Saved</button>
+  <button class="tab on" data-tab="all">For You</button>
+  <button class="mute-m" data-a="mute" aria-label="Mute"></button>
+</div>
+
+<nav class="side">
+  <div class="logo"><span class="mark">HT</span><span>Hacker<span class="t2">Tok</span></span></div>
+  <button class="nav on" data-tab="all"><svg viewBox="0 0 24 24"><path d="M12 3l9 8h-3v9h-5v-6h-2v6H6v-9H3z"/></svg>For You</button>
+  <button class="nav" data-tab="saved"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Saved<span class="count" id="savedCount"></span></button>
+  <hr>
+  <div class="hint"><kbd>↑</kbd> <kbd>↓</kbd> scroll · <kbd>l</kbd> save<br><kbd>c</kbd> comments · <kbd>r</kbd> re-roll<br><kbd>f</kbd> fill/fit · <kbd>?</kbd> all keys</div>
+  <div class="foot">Every video starts at a random minute. Comments are real Hacker News threads.<br><br>Data: <a href="https://hackertube.org" target="_blank" rel="noopener">HackerTube</a> (ODC-By) · open-index/hacker-news. Not affiliated with YouTube or Y Combinator.</div>
+</nav>
+
+<div class="feed" id="feed"></div>
+<div class="arrows"><button data-go="-1" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M12 7l-7 7 1.4 1.4L12 9.8l5.6 5.6L19 14z"/></svg></button><button data-go="1" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M12 17l7-7-1.4-1.4-5.6 5.6-5.6-5.6L5 10z"/></svg></button></div>
+<div class="saved-empty" id="savedEmpty"><div><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg><p>Nothing saved yet.<br>Double-tap a video or tap the heart to keep it here.<br>Saves stay in this browser only.</p></div></div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="sheet" id="sheet" aria-label="Hacker News comments">
+  <div class="grab"></div>
+  <div class="sh-head"><span style="width:30px"></span><h2 id="shTitle">Comments</h2><button id="shClose" aria-label="Close">×</button></div>
+  <div class="sh-sub">What Hacker News said when they linked this video</div>
+  <div class="clist" id="clist"></div>
+</aside>
+
+<div class="splash" id="splash">
+  <div>
+    <div class="logo"><span class="mark">HT</span><span>Hacker<span class="t2">Tok</span></span></div>
+    <p>The YouTube videos Hacker News keeps recommending, each one dropped in at a random minute. The comments are the real HN threads.</p>
+    <button class="go" id="go" disabled>Loading…</button>
+    <div class="credit">Data from <a href="https://hackertube.org" target="_blank" rel="noopener">HackerTube</a> (ODC-By) and the open-index/hacker-news archive. Not affiliated with YouTube or Y&nbsp;Combinator.</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="help-box" id="helpBox">
+  <h3>Shortcuts</h3>
+  <div>Next / previous<span><kbd>j</kbd> <kbd>k</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></span></div>
+  <div>Save<span><kbd>l</kbd> or double-tap</span></div>
+  <div>Comments<span><kbd>c</kbd></span></div>
+  <div>Another random minute<span><kbd>r</kbd></span></div>
+  <div>Fill screen / whole video<span><kbd>f</kbd></span></div>
+  <div>Pause / play<span><kbd>space</kbd> or tap</span></div>
+  <div>Mute<span><kbd>m</kbd></span></div>
+  <small>Press ? or Esc to close.</small>
+</div>
+
+<script>
+(() => {
+const LS_LIKES = "hackertok.likes", LS_SEEN = "hackertok.seen", LS_FIT = "hackertok.fit";
+const P = d => `<svg viewBox="0 0 24 24"><path d="${d}"/></svg>`;
+const ICON = {
+  heart: P("M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"),
+  chat: P("M12 3C6.48 3 2 6.92 2 11.75c0 2.6 1.3 4.93 3.36 6.53L4.5 22l4.3-2.2c1.02.27 2.1.42 3.2.42 5.52 0 10-3.92 10-8.75S17.52 3 12 3zM7.5 13a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm4.5 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm4.5 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"),
+  dice: P("M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM12 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM7.5 15a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"),
+  share: P("M14 4l8 7.5-8 7.5v-4.5c-5.5 0-9 1.6-12 5.5 1.2-5.6 4.6-10.6 12-11.7V4z"),
+  play: P("M8 5.14v13.72a1 1 0 0 0 1.52.85l10.9-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"),
+  note: P("M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"),
+  vol: P("M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"),
+  mute: P("M16.5 12A4.5 4.5 0 0 0 14 8v2.18l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.8 8.8 0 0 0 21 12a9 9 0 0 0-7-8.77v2.06A7 7 0 0 1 19 12zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a9 9 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"),
+  fill: P("M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"),
+  fit: P("M8 4h2v6H4V8h4V4zm6 0h2v4h4v2h-6V4zM4 14h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z")
+};
+const STANCE = {strong_rec:"🔥 strong rec", rec:"👍 recommends", reference:"📎 cites it", critical:"🙄 critical", joke:"😂 joke"};
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const feed = $("#feed");
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = String(s%60).padStart(2,"0"); return h ? `${h}:${String(m).padStart(2,"0")}:${x}` : `${m}:${x}`; };
+const kfmt = n => n >= 1000 ? (n/1000).toFixed(1).replace(/\.0$/,"") + "K" : String(n);
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const tagify = s => "#" + s.toLowerCase().replace(/[^a-z0-9+#]+/g, "");
+
+let videos = [], byId = new Map();
+let likes = load(LS_LIKES, []);
+let seen = new Set(load(LS_SEEN, []));
+let fit = load(LS_FIT, false);
+let order = [], rendered = 0, tab = "all";
+let active = null, player = null, muted = false, ytReady = null;
+
+/* ---------- order: weighted random, favouring well-loved videos, unseen first ---------- */
+function shuffled() {
+  const key = v => {
+    let w = v.s + 1;
+    if (!v.recs) w *= 0.3;
+    if (seen.has(v.v)) w *= 0.05;
+    return Math.pow(Math.random(), 1 / w);
+  };
+  return videos.map(v => [key(v), v]).sort((a, b) => b[0] - a[0]).map(x => x[1]);
+}
+
+/* ---------- slides ---------- */
+function slideHTML(v) {
+  const liked = likes.includes(v.v);
+  const tags = [v.type, ...(v.tags || [])].filter(Boolean).map(tagify).filter((t, i, a) => t.length > 1 && a.indexOf(t) === i).slice(0, 5);
+  const q = v.q ? `<span class="q">“${esc(v.q)}”</span> ` : "";
+  const sound = `Dropped in at a random minute · ${esc(v.ch)}`;
+  return `
+  <div class="card ${fit ? "fit" : "fill"}">
+    <div class="media">
+      <div class="bg" style="background-image:url(https://i.ytimg.com/vi/${v.v}/hq2.jpg)"></div>
+      <img class="poster" alt="" src="https://i.ytimg.com/vi/${v.v}/hq2.jpg" onerror="this.src='https://i.ytimg.com/vi/${v.v}/hqdefault.jpg'">
+    </div>
+    <div class="shade"></div>
+    <div class="tap"></div>
+    <div class="paused">${ICON.play}</div>
+    <div class="loading"><i></i><i></i></div>
+    <div class="drop"></div>
+    <div class="ctl l"><button class="cbtn" data-a="mute" aria-label="Mute"></button></div>
+    <div class="ctl r"><button class="cbtn ytb" data-a="yt" title="Watch on YouTube"><svg viewBox="0 0 28 20"><rect width="28" height="20" rx="5" fill="#ff0000"/><path d="M11 5.5v9l7.5-4.5z" fill="#fff"/></svg><span>YouTube</span></button><button class="cbtn" data-a="fit" title="Fill screen / whole video (f)">${fit ? ICON.fill : ICON.fit}<span>${fit ? "Fill" : "Full video"}</span></button></div>
+    <div class="prog"><div class="tr"><div class="fl"></div><div class="kn"></div></div><div class="tm"></div></div>
+    <div class="cap">
+      <div class="who">@${esc(v.ch)} <span class="y">· HN ${v.y[0] === v.y[1] ? v.y[0] : v.y[0] + "–" + v.y[1]}</span></div>
+      <div class="desc"><span class="ttl">${esc(v.t)}</span> ${q}${esc(v.why)} <span class="tags">${tags.map(t => `<b>${esc(t)}</b>`).join("")}</span><span class="sum">${esc(v.sum)}</span></div>
+      <button class="more" data-a="more">more</button>
+      <div class="sound">${ICON.note}<div class="mq"><span>${sound} &nbsp;·&nbsp; ${sound} &nbsp;·&nbsp;</span></div></div>
+    </div>
+  </div>
+  <div class="rail">
+    <div class="av" style="background:hsl(${hue(v.ch)} 70% 66%)" title="${esc(v.ch)}">${esc((v.ch[0] || "?").toUpperCase())}<span class="plus">Y</span></div>
+    <button class="act like ${liked ? "liked" : ""}" data-a="like" title="Save (l)"><span class="ic">${ICON.heart}</span><span class="lc">${kfmt(v.recs + (liked ? 1 : 0))}</span></button>
+    <button class="act" data-a="comments" title="HN comments (c)"><span class="ic">${ICON.chat}</span><span>${v.n}</span></button>
+    <button class="act" data-a="reroll" title="Another random minute (r)"><span class="ic">${ICON.dice}</span><span>Re-roll</span></button>
+    <button class="act" data-a="yt" title="Open on YouTube at this moment"><span class="ic">${ICON.share}</span><span>YouTube</span></button>
+    <button class="disc" data-a="yt" title="Open on YouTube"><img alt="" src="https://i.ytimg.com/vi/${v.v}/default.jpg"></button>
+  </div>`;
+}
+
+function renderMore(n = 8) {
+  const end = Math.min(order.length, rendered + n);
+  for (; rendered < end; rendered++) {
+    const v = order[rendered];
+    const el = document.createElement("section");
+    el.className = "slide"; el.dataset.v = v.v;
+    el.innerHTML = slideHTML(v);
+    feed.appendChild(el);
+    io.observe(el);
+  }
+  paintMute();
+}
+
+function resetFeed() {
+  stopPlayer();
+  feed.innerHTML = ""; rendered = 0; active = null;
+  order = tab === "all" ? shuffled() : likes.map(id => byId.get(id)).filter(Boolean);
+  $("#savedEmpty").classList.toggle("on", tab === "saved" && !order.length);
+  feed.scrollTop = 0;
+  renderMore();
+}
+
+const io = new IntersectionObserver(entries => {
+  for (const e of entries) if (e.isIntersecting && e.intersectionRatio > 0.6) activate(e.target);
+}, { root: feed, threshold: [0.6] });
+
+/* ---------- player ---------- */
+function loadYT() {
+  if (ytReady) return ytReady;
+  ytReady = new Promise(res => {
+    window.onYouTubeIframeAPIReady = res;
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(s);
+  });
+  return ytReady;
+}
+
+function pickStart(dur) {
+  if (!dur || dur < 90) return 0;
+  const lastMinute = Math.floor((dur - 45) / 60);
+  const first = lastMinute >= 2 ? 1 : 0;
+  return 60 * (first + Math.floor(Math.random() * (lastMinute - first + 1)));
+}
+
+function stopPlayer() {
+  if (player) { try { player.destroy(); } catch {} player = null; }
+  $$(".media iframe, .media .host").forEach(n => n.remove());
+  $$(".poster").forEach(n => n.style.display = "");
+  $$(".card").forEach(c => c.classList.remove("is-paused", "is-loading"));
+  $$(".prog .fl").forEach(f => f.style.width = "0");
+}
+
+async function activate(slide) {
+  if (active === slide) return;
+  active = slide;
+  const idx = [...feed.children].indexOf(slide);
+  if (idx > rendered - 4) renderMore();
+  const vid = slide.dataset.v;
+  if (tab === "all" && !seen.has(vid)) { seen.add(vid); save(LS_SEEN, [...seen].slice(-3000)); }
+  if (sheetOpen) openComments(vid);
+
+  stopPlayer();
+  const card = slide.querySelector(".card");
+  card.classList.add("is-loading");
+  await loadYT();
+  if (active !== slide) return;
+  const host = document.createElement("div"); host.className = "host";
+  card.querySelector(".media").appendChild(host);
+  let jumped = false;
+  const jump = (p, again) => {
+    const dur = p.getDuration();
+    if (!dur) return false;
+    const t = pickStart(dur);
+    p.seekTo(t, true);
+    showDrop(slide, t, dur, again);
+    return true;
+  };
+  const p = new YT.Player(host, {
+    host: "https://www.youtube-nocookie.com",
+    videoId: vid,
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, cc_load_policy: 0, mute: muted ? 1 : 0 },
+    events: {
+      onReady: e => {
+        if (player !== p) return;
+        try { e.target.unloadModule("captions"); } catch {}
+        jumped = jump(e.target);
+        e.target.playVideo();
+      },
+      onStateChange: e => {
+        if (player !== p) return;
+        const S = YT.PlayerState;
+        if (e.data === S.PLAYING) {
+          if (!jumped) jumped = jump(e.target);
+          if (!p._cc) { p._cc = true; try { e.target.unloadModule("captions"); } catch {} }
+          card.querySelector(".poster").style.display = "none";
+          card.classList.remove("is-loading", "is-paused");
+        }
+        if (e.data === S.PAUSED) card.classList.add("is-paused");
+        if (e.data === S.BUFFERING) card.classList.add("is-loading");
+        if (e.data === S.ENDED) next(1);
+      },
+      onError: () => {
+        if (player !== p) return;
+        card.classList.remove("is-loading");
+        const d = card.querySelector(".drop");
+        d.innerHTML = "Can't play this one here<small>Skipping…</small>"; d.classList.add("on");
+        setTimeout(() => { d.classList.remove("on"); if (active === slide) next(1); }, 1400);
+      }
+    }
+  });
+  player = p;
+  player._slide = slide;
+}
+
+function showDrop(slide, t, dur, again) {
+  const d = slide.querySelector(".drop");
+  d.innerHTML = `${again ? "🎲 Re-rolled" : "🎲 Dropped in"} at ${fmt(t)}<small>of ${fmt(dur)}</small>`;
+  d.classList.add("on");
+  clearTimeout(d._t); d._t = setTimeout(() => d.classList.remove("on"), 2200);
+  const mq = slide.querySelector(".sound .mq span");
+  const s = `Dropped in at ${fmt(t)} of ${fmt(dur)} · ${esc(byId.get(slide.dataset.v).ch)}`;
+  mq.innerHTML = `${s} &nbsp;·&nbsp; ${s} &nbsp;·&nbsp;`;
+}
+
+function reroll() {
+  if (!player || !player.getDuration) return;
+  const dur = player.getDuration(); if (!dur) return;
+  let t = pickStart(dur), cur = player.getCurrentTime();
+  for (let i = 0; i < 4 && dur > 150 && Math.abs(t - cur) < 60; i++) t = pickStart(dur);
+  player.seekTo(t, true); player.playVideo();
+  showDrop(active, t, dur, true);
+}
+
+function togglePlay() {
+  if (!player || !player.getPlayerState) return;
+  player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo();
+}
+
+/* progress bar loop */
+setInterval(() => {
+  if (!player || !player.getCurrentTime || !active || dragging) return;
+  const dur = player.getDuration(), t = player.getCurrentTime();
+  if (dur) setProg(active, t / dur);
+}, 250);
+function setProg(slide, f) {
+  f = Math.min(1, Math.max(0, f));
+  slide.querySelector(".prog .fl").style.width = f * 100 + "%";
+  slide.querySelector(".prog .kn").style.left = f * 100 + "%";
+}
+let dragging = false;
+feed.addEventListener("pointerdown", e => {
+  const bar = e.target.closest(".prog"); if (!bar) return;
+  const slide = bar.closest(".slide"); if (slide !== active || !player || !player.getDuration) return;
+  const dur = player.getDuration(); if (!dur) return;
+  dragging = true; bar.classList.add("drag"); bar.setPointerCapture(e.pointerId);
+  const at = ev => { const r = bar.getBoundingClientRect(); return Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)); };
+  const move = ev => { const f = at(ev); setProg(slide, f); bar.querySelector(".tm").textContent = `${fmt(f * dur)} / ${fmt(dur)}`; };
+  const up = ev => {
+    player.seekTo(at(ev) * dur, true); player.playVideo();
+    dragging = false; bar.classList.remove("drag");
+    bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); bar.removeEventListener("pointercancel", up);
+  };
+  move(e);
+  bar.addEventListener("pointermove", move); bar.addEventListener("pointerup", up); bar.addEventListener("pointercancel", up);
+});
+
+/* ---------- actions ---------- */
+function next(dir) {
+  if (!active) return;
+  const target = dir > 0 ? active.nextElementSibling : active.previousElementSibling;
+  if (target) target.scrollIntoView({ behavior: "smooth" });
+}
+
+function setLike(vid, on) {
+  const i = likes.indexOf(vid);
+  if (on === undefined) on = i < 0;
+  if (on && i < 0) likes.unshift(vid);
+  if (!on && i >= 0) likes.splice(i, 1);
+  save(LS_LIKES, likes);
+  const v = byId.get(vid);
+  $$(`.slide[data-v="${vid}"] .like`).forEach(b => {
+    b.classList.toggle("liked", on);
+    b.querySelector(".lc").textContent = kfmt(v.recs + (on ? 1 : 0));
+  });
+  paintSavedCount();
+  return on;
+}
+
+function burst(card, x, y) {
+  const r = card.getBoundingClientRect();
+  const h = document.createElement("div");
+  h.className = "burst"; h.innerHTML = ICON.heart;
+  h.style.left = (x - r.left) + "px"; h.style.top = (y - r.top) + "px";
+  h.style.setProperty("--r", (Math.random() * 40 - 20) + "deg");
+  card.appendChild(h);
+  setTimeout(() => h.remove(), 950);
+}
+
+function openYT(slide) {
+  const t = player && player._slide === slide && player.getCurrentTime ? Math.floor(player.getCurrentTime()) : 0;
+  if (player && player.pauseVideo) player.pauseVideo();
+  window.open(`https://www.youtube.com/watch?v=${slide.dataset.v}&t=${t}s`, "_blank", "noopener");
+}
+
+function setFit(on) {
+  fit = on; save(LS_FIT, fit);
+  $$(".card").forEach(c => { c.classList.toggle("fit", fit); c.classList.toggle("fill", !fit); });
+  $$('[data-a="fit"]').forEach(b => b.innerHTML = `${fit ? ICON.fill : ICON.fit}<span>${fit ? "Fill" : "Full video"}</span>`);
+}
+
+function toggleMute() {
+  muted = !muted;
+  if (player && player.mute) muted ? player.mute() : player.unMute();
+  paintMute();
+}
+function paintMute() { $$('[data-a="mute"]').forEach(b => b.innerHTML = muted ? ICON.mute : ICON.vol); }
+
+let tapT = null, lastTap = 0;
+document.addEventListener("click", e => {
+  const tap = e.target.closest(".tap");
+  if (tap) {
+    const slide = tap.closest(".slide"), card = tap.closest(".card");
+    const now = Date.now();
+    if (now - lastTap < 300) {               // double tap → save + heart
+      clearTimeout(tapT); lastTap = 0;
+      burst(card, e.clientX, e.clientY);
+      if (!likes.includes(slide.dataset.v)) { setLike(slide.dataset.v, true); }
+      return;
+    }
+    lastTap = now;
+    tapT = setTimeout(() => { if (slide === active) togglePlay(); else slide.scrollIntoView({behavior:"smooth"}); }, 260);
+    return;
+  }
+  const go = e.target.closest("[data-go]"); if (go) { next(+go.dataset.go); return; }
+  const btn = e.target.closest("[data-a]"); if (!btn) return;
+  const slide = btn.closest(".slide");
+  const a = btn.dataset.a;
+  if (a === "like") { const on = setLike(slide.dataset.v); toast(on ? "Saved to this browser" : "Removed from Saved"); }
+  else if (a === "comments") openComments(slide.dataset.v);
+  else if (a === "reroll") { if (slide !== active) slide.scrollIntoView({behavior:"smooth"}); else reroll(); }
+  else if (a === "yt") openYT(slide);
+  else if (a === "more") { const d = slide.querySelector(".desc"); const o = d.classList.toggle("open"); btn.textContent = o ? "less" : "more"; }
+  else if (a === "fit") setFit(!fit);
+  else if (a === "mute") toggleMute();
+});
+
+/* ---------- comments ---------- */
+let sheetOpen = false, sheetVid = null;
+const cache = new Map();
+async function openComments(vid) {
+  sheetOpen = true; sheetVid = vid;
+  $("#sheet").classList.add("on"); $("#scrim").classList.add("on");
+  const v = byId.get(vid);
+  $("#shTitle").textContent = `${v.n} comment${v.n === 1 ? "" : "s"}`;
+  const list = $("#clist");
+  if (!cache.has(vid)) {
+    list.innerHTML = '<div class="empty">Loading…</div>';
+    try { cache.set(vid, await (await fetch(`data/c/${vid}.json`)).json()); }
+    catch { cache.set(vid, []); }
+  }
+  if (sheetVid !== vid) return;
+  const cs = cache.get(vid);
+  list.innerHTML = cs.length ? cs.map(commentHTML).join("") : '<div class="empty">No comments for this one.</div>';
+  list.scrollTop = 0;
+}
+function closeComments() { sheetOpen = false; $("#sheet").classList.remove("on"); $("#scrim").classList.remove("on"); }
+function commentHTML(c) {
+  const [y, m] = c.m.split("-");
+  const when = new Date(+y, +m - 1).toLocaleString("en", { month: "short", year: "numeric" });
+  const text = esc(c.text).replace(/\[VIDEO\]/g, '<span class="tok v">▶ this video</span>').replace(/\[LINK\]/g, '<span class="tok">link</span>');
+  return `<div class="cm">
+    <span class="cav" style="background:hsl(${hue(c.a)} 70% 66%)">${esc(c.a[0].toUpperCase())}</span>
+    <div class="cbody">
+      <div class="cm-a">${esc(c.a)} <span class="st ${c.st}">${STANCE[c.st] || c.st}</span></div>
+      <div class="cm-t">${text}</div>
+      <div class="cm-meta"><span>${when}</span>${c.story ? `<span>in “${esc(c.story)}”</span>` : ""}<a href="https://news.ycombinator.com/item?id=${c.id}" target="_blank" rel="noopener">Reply on HN ↗</a></div>
+    </div>
+  </div>`;
+}
+$("#shClose").onclick = closeComments;
+$("#scrim").onclick = closeComments;
+
+/* ---------- tabs, keys, misc ---------- */
+function switchTab(t) {
+  if (tab === t) return;
+  tab = t;
+  $$("[data-tab]").forEach(x => x.classList.toggle("on", x.dataset.tab === t));
+  closeComments(); resetFeed();
+}
+$$("[data-tab]").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function paintSavedCount() { const c = $("#savedCount"); if (c) c.textContent = likes.length || ""; }
+const helpBox = $("#helpBox");
+
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 1300); }
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || $("#splash")) return;
+  const k = e.key;
+  if (k === "j" || k === "ArrowDown") { e.preventDefault(); next(1); }
+  else if (k === "k" || k === "ArrowUp") { e.preventDefault(); next(-1); }
+  else if (k === "l" && active) { const on = setLike(active.dataset.v); toast(on ? "Saved to this browser" : "Removed from Saved"); }
+  else if (k === "c" && active) sheetOpen ? closeComments() : openComments(active.dataset.v);
+  else if (k === "r") reroll();
+  else if (k === "f") setFit(!fit);
+  else if (k === " ") { e.preventDefault(); togglePlay(); }
+  else if (k === "m") toggleMute();
+  else if (k === "?") helpBox.classList.toggle("on");
+  else if (k === "Escape") { helpBox.classList.remove("on"); closeComments(); }
+});
+
+/* ---------- boot ---------- */
+loadYT();
+paintMute();
+fetch("data/videos.json").then(r => r.json()).then(list => {
+  videos = list; byId = new Map(list.map(v => [v.v, v]));
+  likes = likes.filter(id => byId.has(id));
+  paintSavedCount();
+  const go = $("#go");
+  go.disabled = false; go.textContent = "Start watching";
+  go.onclick = () => { $("#splash").remove(); resetFeed(); };
+});
+})();
+</script>
+</body>
+</html>

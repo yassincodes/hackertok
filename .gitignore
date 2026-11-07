@@ -1,0 +1,5 @@
+# original HackerTube download (regenerate site/data with scripts/build_data.py)
+data/
+.DS_Store
+.vercel
+__pycache__/
